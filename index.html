@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC 자산관리 대장</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1d2330;--mut:#6b7280;--bd:#dfe3ea;--ac:#2563eb;--act:#fff;--dg:#dc2626}
+@media (prefers-color-scheme:dark){:root{--bg:#14171d;--card:#1e222b;--tx:#e8eaf0;--mut:#9aa3b2;--bd:#323846;--ac:#5b8cff;--act:#0b1020;--dg:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;font-size:15px}
+.w{max-width:900px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--mut);font-size:13px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+label{font-size:12px;color:var(--mut);display:block;margin-bottom:4px}
+input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+button{padding:9px 14px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx);font:inherit;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+button.p{background:var(--ac);color:var(--act);border-color:var(--ac)}
+button.d{color:var(--dg)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:560px}
+th,td{padding:9px 8px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+th{font-size:12px;color:var(--mut);font-weight:600}
+td.n,th.n{text-align:right}
+td button{padding:4px 8px;font-size:12px}
+.tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;border:1px solid var(--bd)}
+.empty{text-align:center;color:var(--mut);padding:24px}
+.sum{display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--mut);margin-bottom:10px}
+.sum b{color:var(--tx)}
+details summary{cursor:pointer;font-weight:600}
+textarea{min-height:110px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;margin-top:10px}
+.msg{font-size:12px;color:var(--mut)}
+.err{color:var(--dg)}
+</style>
+</head>
+<body>
+<div class="w">
+<h1>PC 자산관리 대장</h1>
+<div class="sub">여러 사람이 함께 쓰는 공유 대장입니다. 입력한 내용은 모두에게 보입니다.</div>
+
+<div class="card">
+<div class="g">
+<div><label>PC 브랜드</label><input id="brand" placeholder="예: 삼성, LG, Dell"></div>
+<div><label>모델명</label><input id="model" placeholder="예: 갤럭시북3"></div>
+<div><label>구매년도</label><input id="year" type="number" placeholder="2024" min="1990" max="2100"></div>
+<div><label>구매금액(원)</label><input id="price" type="number" placeholder="1200000" min="0"></div>
+<div><label>상태</label>
+<select id="status"><option>사용중</option><option>보관</option><option>수리중</option><option>폐기예정</option><option>폐기</option></select></div>
+</div>
+<div class="row">
+<button class="p" id="add">등록</button>
+<button id="cancel" style="display:none">수정 취소</button>
+<span class="msg" id="fm"></span>
+</div>
+</div>
+
+<div class="card">
+<div class="sum"><span>총 <b id="cnt">0</b>대</span><span>구매금액 합계 <b id="tot">0</b>원</span><button id="refresh">새로고침</button><span class="msg" id="st"></span></div>
+<div class="tw"><table>
+<thead><tr><th>PC 브랜드</th><th>모델명</th><th class="n">구매년도</th><th class="n">구매금액</th><th>상태</th><th></th></tr></thead>
+<tbody id="tb"></tbody></table></div>
+</div>
+
+<div class="card">
+<details>
+<summary>엑셀로 내보내기 / 가져오기</summary>
+<div class="row">
+<button id="copy">엑셀용으로 복사</button>
+<button id="imp">아래 내용으로 가져오기(추가)</button>
+<span class="msg" id="xm"></span>
+</div>
+<textarea id="ta" placeholder="엑셀에서 5개 열(PC브랜드, 모델명, 구매년도, 구매금액, 상태)을 복사해 여기에 붙여넣은 뒤 [가져오기]를 누르세요. 첫 줄이 제목이어도 됩니다."></textarea>
+</details>
+</div>
+</div>
+
+<script>
+var SUPABASE_URL="https://hlkpkclncoxzvzcyclbt.supabase.co";
+var SUPABASE_KEY="sb_publishable__Ezs1LgxAla9Lr1ebxDEbw_7Xdub71w";
+var TABLE="pc_assets";
+
+var rows=[],editId=null,busy=false;
+function $(i){return document.getElementById(i)}
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function fmt(n){return Number(n||0).toLocaleString("ko-KR")}
+function numOrNull(v){var n=parseInt(String(v).replace(/[^\d-]/g,""),10);return isNaN(n)?null:n}
+
+function api(method,query,body){
+  var h={"apikey":SUPABASE_KEY,"Content-Type":"application/json"};
+  if(method!=="GET")h["Prefer"]="return=minimal";
+  return fetch(SUPABASE_URL+"/rest/v1/"+TABLE+(query||""),{method:method,headers:h,body:body?JSON.stringify(body):undefined})
+    .then(function(r){
+      if(!r.ok)return r.text().then(function(t){throw new Error(r.status+" "+t)});
+      return method==="GET"?r.json():null;
+    });
+}
+function setSt(t,err){var s=$("st");s.textContent=t;s.className="msg"+(err?" err":"")}
+
+function load(){
+  setSt("불러오는 중...");
+  return api("GET","?select=*&order=id.asc").then(function(d){rows=d||[];render();setSt("")})
+    .catch(function(e){setSt("불러오기 실패: "+e.message,true)});
+}
+function render(){
+  var tb=$("tb"),t=0;
+  if(!rows.length){tb.innerHTML='<tr><td colspan="6" class="empty">등록된 PC가 없습니다.</td></tr>'}
+  else tb.innerHTML=rows.map(function(r){t+=Number(r.price)||0;
+    return "<tr><td>"+esc(r.brand)+"</td><td>"+esc(r.model)+'</td><td class="n">'+esc(r.year)+'</td><td class="n">'+fmt(r.price)+'</td><td><span class="tag">'+esc(r.status)+'</span></td><td><button data-e="'+r.id+'">수정</button> <button class="d" data-d="'+r.id+'">삭제</button></td></tr>'}).join("");
+  $("cnt").textContent=rows.length;$("tot").textContent=fmt(t);
+}
+function reset(){editId=null;["brand","model","year","price"].forEach(function(i){$(i).value=""});$("status").selectedIndex=0;$("add").textContent="등록";$("cancel").style.display="none"}
+
+$("add").onclick=function(){
+  var r={brand:$("brand").value.trim(),model:$("model").value.trim(),year:numOrNull($("year").value),price:numOrNull($("price").value),status:$("status").value};
+  if(!r.brand||!r.model){$("fm").textContent="브랜드와 모델명은 필수입니다.";$("fm").className="msg err";return}
+  $("fm").textContent="저장 중...";$("fm").className="msg";$("add").disabled=true;
+  var p=editId?api("PATCH","?id=eq."+editId,r):api("POST","",r);
+  p.then(function(){$("fm").textContent="";reset();return load()})
+   .catch(function(e){$("fm").textContent="저장 실패: "+e.message;$("fm").className="msg err"})
+   .then(function(){$("add").disabled=false});
+};
+$("cancel").onclick=reset;
+$("refresh").onclick=load;
+
+$("tb").onclick=function(e){
+  var d=e.target.getAttribute("data-d"),ed=e.target.getAttribute("data-e");
+  if(d){if(confirm("삭제할까요?")){api("DELETE","?id=eq."+d).then(load).catch(function(x){setSt("삭제 실패: "+x.message,true)})}}
+  if(ed){var r=rows.filter(function(x){return String(x.id)===ed})[0];if(!r)return;editId=ed;
+    $("brand").value=r.brand||"";$("model").value=r.model||"";$("year").value=r.year==null?"":r.year;$("price").value=r.price==null?"":r.price;
+    var s=$("status");if(![].some.call(s.options,function(o){return o.value===r.status})){s.add(new Option(r.status))}s.value=r.status;
+    $("add").textContent="수정 저장";$("cancel").style.display="";window.scrollTo(0,0)}
+};
+
+function tsv(){return ["PC브랜드","모델명","구매년도","구매금액","상태"].join("\t")+"\n"+rows.map(function(r){return [r.brand,r.model,r.year==null?"":r.year,r.price==null?"":r.price,r.status].join("\t")}).join("\n")}
+$("copy").onclick=function(){
+  var t=tsv(),ta=$("ta");ta.value=t;
+  function ok(){$("xm").textContent="복사됨 - 엑셀에 붙여넣기 하세요."}
+  function fb(){ta.select();try{document.execCommand("copy");ok()}catch(e){$("xm").textContent="아래 내용을 직접 복사하세요."}}
+  try{navigator.clipboard.writeText(t).then(ok,fb)}catch(e){fb()}
+};
+$("imp").onclick=function(){
+  var lines=$("ta").value.split(/\r?\n/).filter(function(l){return l.trim()}),list=[];
+  lines.forEach(function(l){var c=l.split("\t").map(function(s){return s.trim()});
+    if(c[0]==="PC브랜드"||c.length<2)return;
+    list.push({brand:c[0]||"",model:c[1]||"",year:numOrNull(c[2]||""),price:numOrNull(c[3]||""),status:c[4]||"사용중"})});
+  if(!list.length){$("xm").textContent="가져올 내용이 없습니다.";return}
+  $("xm").textContent="가져오는 중...";
+  api("POST","",list).then(function(){$("xm").textContent=list.length+"건 가져왔습니다.";$("ta").value="";return load()})
+    .catch(function(e){$("xm").textContent="가져오기 실패: "+e.message});
+};
+
+load();
+setInterval(function(){if(!editId&&!document.hidden)load()},30000);
+</script>
+</body>
+</html>
